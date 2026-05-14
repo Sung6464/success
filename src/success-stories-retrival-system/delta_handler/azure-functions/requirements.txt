@@ -1,0 +1,32 @@
+# Azure Functions
+azure-functions
+
+# Azure Services
+azure-cosmos
+azure-storage-blob
+azure-identity
+azure-ai-documentintelligence
+
+# Microsoft Graph & Authentication
+msal
+requests
+
+# LangChain & AI
+langchain
+langchain-openai
+langchain-core
+langchain-community
+
+# Vector Store
+pgvector
+psycopg2-binary
+sqlalchemy
+
+# Document Processing
+pypdf
+python-docx
+tiktoken
+
+# Utilities
+python-dotenv
+pydantic

@@ -1,0 +1,68 @@
+# LangChain Core Dependencies (Compatible versions)
+langchain
+langchain-classic
+langchain-openai
+langchain-core
+langchain-community
+langchain-mongodb
+
+# Vector Store and Embeddings
+chromadb
+faiss-cpu
+
+# LLM Providers
+openai
+
+# Document Loaders
+pypdf
+python-docx
+python-pptx
+beautifulsoup4
+lxml
+
+# OCR Support
+pytesseract
+pillow
+pdf2image
+
+# Text Processing
+tiktoken
+unstructured
+
+# Environment
+python-dotenv
+
+# Web Framework
+gradio
+
+# Utilities
+requests
+pydantic
+
+# Azure Blob Storage
+azure-storage-blob
+azure-identity
+# azure-identity
+
+# PostgreSQL with pgvector
+psycopg2-binary
+pgvector
+sqlalchemy
+
+# MongoDB
+pymongo
+
+#markdown2docx
+markdown-it-py
+linkify-it-py
+beautifulsoup4
+Pillow
+python-docx
+
+# FastMCP
+fastmcp
+gunicorn
+uvicorn
+starlette
+fastapi
+azure-ai-documentintelligence
