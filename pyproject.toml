@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "success-stories-retrieval-system"
+version = "0.1.0"
+description = "Success Stories Retrieval System MCP server"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+  "common-adapters @ git+https://github.com/Coforge-forgeX/forgexpackages.git@v1.0.2",
+  "langchain",
+  "langchain-classic",
+  "langchain-openai",
+  "langchain-core",
+  "langchain-community",
+  "langchain-mongodb",
+  "chromadb",
+  "faiss-cpu",
+  "openai",
+  "pypdf",
+  "python-docx",
+  "python-pptx",
+  "beautifulsoup4",
+  "lxml",
+  "pytesseract",
+  "pillow",
+  "pdf2image",
+  "tiktoken",
+  "unstructured",
+  "python-dotenv",
+  "gradio",
+  "requests",
+  "pydantic",
+  "azure-storage-blob",
+  "azure-identity",
+  "azure-ai-documentintelligence",
+  "psycopg2-binary",
+  "pgvector",
+  "sqlalchemy",
+  "pymongo",
+  "markdown-it-py",
+  "linkify-it-py",
+  "fastmcp",
+  "gunicorn",
+  "uvicorn",
+  "starlette",
+  "fastapi",
+  "langfuse>=2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[project.scripts]
+ssrs-server = "success_stories_retrival_system.main:http_app"

@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 from starlette.routing import Route
 from llm.azurecustomllm import AzureCustomLLM
-from download_response import download_message as convert_message , download_cleanup
+from common_adapters.download_response import download_message as convert_message , download_cleanup
 import uvicorn
 from typing import Optional
 import os
