@@ -9,7 +9,7 @@ description = "Success Stories Retrieval System MCP server"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-  "common-adapters @ git+https://github.com/Coforge-forgeX/forgexpackages.git@v1.0.2",
+  "common-adapters @ git+https://github.com/Coforge-forgeX/forgexpackages.git@main",
   "langchain",
   "langchain-classic",
   "langchain-openai",
