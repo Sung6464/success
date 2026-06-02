@@ -1,3 +1,8 @@
+from dotenv import load_dotenv
+load_dotenv()
+#from langfuse_instrumentation import setup_langfuse
+from common_adapters.langfuse_instrumentation import setup_langfuse
+setup_langfuse() 
 from server import mcp
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -13,6 +18,7 @@ from starlette.responses import StreamingResponse
 from starlette.routing import Route
 from llm.azurecustomllm import AzureCustomLLM
 from common_adapters.download_response import download_message as convert_message , download_cleanup
+#from download_response import download_message as convert_message , download_cleanup
 import uvicorn
 from typing import Optional
 import os

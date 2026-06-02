@@ -85,7 +85,10 @@ class Config:
     COSMOS_KEY = os.getenv("COSMOS_KEY")
     COSMOS_DATABASE = os.getenv("COSMOS_DATABASE", "sharepoint_tracking")
     COSMOS_CONTAINER = os.getenv("COSMOS_CONTAINER", "file_state")
-    
+    #langfuse
+    LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
+    LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_HOST = os.getenv("LANGFUSE_HOST")
     # Paths
     BASE_DIR = Path(__file__).parent
     DATA_DIR = BASE_DIR / "data"
