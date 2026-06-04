@@ -75,6 +75,10 @@ class Config:
     SHAREPOINT_TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID")
     SHAREPOINT_SITE_HOSTNAME = os.getenv("SHAREPOINT_SITE_HOSTNAME")
     SHAREPOINT_SITE_PATH = os.getenv("SHAREPOINT_SITE_PATH")
+    #langfuse
+    LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")
+    LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
+    LANGFUSE_HOST = os.getenv("LANGFUSE_HOST")
     
     # Paths
     BASE_DIR = Path(__file__).parent

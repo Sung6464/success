@@ -6,6 +6,7 @@ import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+from common_adapters.langfuse_instrumentation import flush as langfuse_flush
 
 @asynccontextmanager
 async def lifespan(server: FastMCP) -> AsyncIterator[None]:
@@ -20,5 +21,8 @@ async def lifespan(server: FastMCP) -> AsyncIterator[None]:
         logging.info("🔧 Shutting down lifespan, closing MongoDB...")
         mongo_client.close()
         logging.info("✅ Lifespan cleanup complete")
-
+        try:
+            langfuse_flush()
+        except Exception:
+            pass
 mcp = FastMCP("Success Story Agent", lifespan=lifespan)
