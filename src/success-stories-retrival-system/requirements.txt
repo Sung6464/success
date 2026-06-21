@@ -66,3 +66,4 @@ uvicorn
 starlette
 fastapi
 azure-ai-documentintelligence
+pymupdf
