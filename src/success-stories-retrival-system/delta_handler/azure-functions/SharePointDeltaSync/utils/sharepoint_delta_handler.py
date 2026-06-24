@@ -14,6 +14,15 @@ import requests
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from dotenv import load_dotenv
+import tempfile
+import sys
+
+# Ensure root package path is in sys.path so we can import utils.proxy_rag
+root_dir = Path(__file__).resolve().parents[4]
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
+from utils.proxy_rag import extract_file, build_tree, index_document
 
 # Import database models
 from .db_models import DatabaseManager, SharePointDeltaLink, SharePointFileTracking
@@ -617,82 +626,126 @@ class SharePointDeltaHandler:
                     stats['failed_files_list'].append(file_name)
                     continue
                 
-                # Extract text
-                file_content = None
+                # --- NEW PROXY RAG INDEXING CODE START ---
+                temp_path = None
                 try:
-                    file_content = self.sharepoint_manager.get_data_from_file(content)
-                    if not file_content:
-                        logger.warning(f"⚠️ No content extracted from {file_name}")
-                        stats['failed_files'] += 1
-                        stats['failed_files_list'].append(file_name)
-                        continue
-                except Exception as e:
-                    logger.error(f"❌ Text extraction failed for {file_name}: {e}")
-                    stats['failed_files'] += 1
-                    stats['failed_files_list'].append(file_name)
-                    continue
-                
-                extension = Path(file_name).suffix.lower()
-                text = None
-                
-                # Build document in exact schema format
-                doc_metadata = {
-                    'id': file_id,
-                    'name': file_name,
-                    'content': file_content,
-                    'text': text,
-                    'metadata': {
-                        'source': doc.get('web_url', ''),
-                        'file_type': extension,
-                        'size': doc.get('size', 0),
-                        'created_at': doc.get('created_at', ''),
-                        'modified_at': doc.get('last_modified', ''),
+                    suffix = Path(file_name).suffix.lower()
+                    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as temp_file:
+                        temp_file.write(content)
+                        temp_path = Path(temp_file.name)
+
+                    # Step 1: Extract PDF/DOCX/PPTX to markdown and images
+                    doc_id, out_dir = extract_file(temp_path, original_name=file_name)
+
+                    # Step 2: Build structure tree
+                    md_path = out_dir / f"{doc_id}.md"
+                    build_tree(doc_id, md_path)
+
+                    # Step 3: Embed tree nodes and index in PostgreSQL proxy_story_embeddings table
+                    # Prepare doc-level metadata to store in PG metadata
+                    doc_metadata = {
                         'url': doc.get('web_url', ''),
-                        'sharepoint_id': file_id,
-                        'mime_type': doc.get('file', {}).get('mimeType', ''),
-                        'graph_url': doc.get('@microsoft.graph.downloadUrl', '')
+                        'graph_url': doc.get('web_url', ''),  # Use web_url as download/view URL
+                        'category': 'general',  # Default category
                     }
-                }
+                    num_nodes = index_document(doc_id, doc_metadata=doc_metadata)
 
-                # print(f"Documnet Details : {doc}")
+                    stats['processed_files'] += 1
+                    stats['total_chunks'] += num_nodes
+                    stats['total_stories'] += 1
+                    logger.info(f"📄 Processing: {file_name}")
+                    logger.info(f"✅ Indexed '{file_name}' with {num_nodes} nodes/chunks")
 
-                chunked = self.embedding_generator.chunk_and_embed_document(doc_metadata)
-                chunk_texts = chunked['chunk_texts']
-                embeddings = chunked['embeddings']
-                metadata_list = chunked['metadata_list']
-
-                if not chunk_texts or not embeddings:
-                    logger.warning(f"⚠️ Skipping {file_name} - no chunks or embeddings generated")
+                except Exception as e:
+                    logger.error(f"❌ Failed to process {file_name} via Proxy RAG: {e}")
                     stats['failed_files'] += 1
                     stats['failed_files_list'].append(file_name)
-                    continue
+                finally:
+                    # Clean up temp file
+                    if temp_path and temp_path.exists():
+                        try:
+                            temp_path.unlink()
+                        except Exception:
+                            pass
+                # --- NEW PROXY RAG INDEXING CODE END ---
 
-                # Step 2: Prepare file-level metadata
-                file_metadata = doc_metadata.get('metadata', {})
-                category = file_metadata.get('category', 'general')
-                source_file = file_name
-                graph_url = file_metadata.get('graph_url', '')  # SharePoint download link
-                file_type = file_metadata.get('file_type', '') 
-
-                # Step 3: Store in PostgreSQL
-                self.vector_store.insert_story(
-                    story_id=file_id,
-                    category=category,
-                    source_file=source_file,
-                    graph_url=graph_url,
-                    file_type=file_type,
-                    chunks=chunk_texts,
-                    embeddings=embeddings,
-                    metadata_list=metadata_list
-                )
-
-                stats['processed_files'] += 1
-                stats['total_chunks'] += len(chunk_texts)
-                stats['total_stories'] += 1
-            
-            
-                logger.info(f"📄 Processing: {file_name}")
-                logger.info(f"✅ Indexed '{file_name}' with {len(chunk_texts)} chunks")
+                # COMMENTED OUT OLD CODE:
+                # # Extract text
+                # file_content = None
+                # try:
+                #     file_content = self.sharepoint_manager.get_data_from_file(content)
+                #     if not file_content:
+                #         logger.warning(f"⚠️ No content extracted from {file_name}")
+                #         stats['failed_files'] += 1
+                #         stats['failed_files_list'].append(file_name)
+                #         continue
+                # except Exception as e:
+                #     logger.error(f"❌ Text extraction failed for {file_name}: {e}")
+                #     stats['failed_files'] += 1
+                #     stats['failed_files_list'].append(file_name)
+                #     continue
+                # 
+                # extension = Path(file_name).suffix.lower()
+                # text = None
+                # 
+                # # Build document in exact schema format
+                # doc_metadata = {
+                #     'id': file_id,
+                #     'name': file_name,
+                #     'content': file_content,
+                #     'text': text,
+                #     'metadata': {
+                #         'source': doc.get('web_url', ''),
+                #         'file_type': extension,
+                #         'size': doc.get('size', 0),
+                #         'created_at': doc.get('created_at', ''),
+                #         'modified_at': doc.get('last_modified', ''),
+                #         'url': doc.get('web_url', ''),
+                #         'sharepoint_id': file_id,
+                #         'mime_type': doc.get('file', {}).get('mimeType', ''),
+                #         'graph_url': doc.get('@microsoft.graph.downloadUrl', '')
+                #     }
+                # }
+                # 
+                # # print(f"Documnet Details : {doc}")
+                # 
+                # chunked = self.embedding_generator.chunk_and_embed_document(doc_metadata)
+                # chunk_texts = chunked['chunk_texts']
+                # embeddings = chunked['embeddings']
+                # metadata_list = chunked['metadata_list']
+                # 
+                # if not chunk_texts or not embeddings:
+                #     logger.warning(f"⚠️ Skipping {file_name} - no chunks or embeddings generated")
+                #     stats['failed_files'] += 1
+                #     stats['failed_files_list'].append(file_name)
+                #     continue
+                # 
+                # # Step 2: Prepare file-level metadata
+                # file_metadata = doc_metadata.get('metadata', {})
+                # category = file_metadata.get('category', 'general')
+                # source_file = file_name
+                # graph_url = file_metadata.get('graph_url', '')  # SharePoint download link
+                # file_type = file_metadata.get('file_type', '') 
+                # 
+                # # Step 3: Store in PostgreSQL
+                # self.vector_store.insert_story(
+                #     story_id=file_id,
+                #     category=category,
+                #     source_file=source_file,
+                #     graph_url=graph_url,
+                #     file_type=file_type,
+                #     chunks=chunk_texts,
+                #     embeddings=embeddings,
+                #     metadata_list=metadata_list
+                # )
+                # 
+                # stats['processed_files'] += 1
+                # stats['total_chunks'] += len(chunk_texts)
+                # stats['total_stories'] += 1
+                # 
+                # 
+                # logger.info(f"📄 Processing: {file_name}")
+                # logger.info(f"✅ Indexed '{file_name}' with {len(chunk_texts)} chunks")
 
         except Exception as e:
             logger.error(f"❌ Failed to process: {e}")

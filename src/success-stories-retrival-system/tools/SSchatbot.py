@@ -2,6 +2,14 @@ from typing import List, Dict, Optional
 from config import Config
 import logging
 import sys
+from pathlib import Path
+
+# Ensure root package path is in sys.path so we can import utils.proxy_rag
+root_dir = Path(__file__).resolve().parents[1]
+if str(root_dir) not in sys.path:
+    sys.path.insert(0, str(root_dir))
+
+from utils.proxy_rag import MMRagBot
 from utils.vector_store import VectorStore
 from utils.rag_pipeline import SuccessStoryChatBot
 from utils.embedding_generator import EmbeddingGenerator
@@ -103,22 +111,24 @@ def delete_chat_session(workspace_id: str, user_id: str, session_id: str):
 
 
 def initialize_components():
-    
-    embedding_generator = EmbeddingGenerator(
-            api_key=Config.AZURE_OPENAI_EMBEDDING_API_KEY,
-            model=Config.AZURE_OPENAI_EMBEDDING_MODEL,
-            use_azure=True,
-            azure_endpoint=Config.AZURE_OPENAI_EMBEDDING_API_BASE,
-            azure_deployment=Config.AZURE_OPENAI_EMBEDDING_MODEL,
-            api_version=Config.AZURE_OPENAI_EMBEDDING_API_VERSION
-        )
+    return MMRagBot()
 
-    postgres_conn = Config.POSTGRES_CONNECTION_STRING
-    vector_store = VectorStore(postgres_conn, min_conn=2, max_conn=10)
-
-    rag_pipeline_inference = SuccessStoryChatBot(embedding_generator, vector_store)
-    
-    return rag_pipeline_inference
+    # COMMENTED OUT OLD INITIALIZATION:
+    # embedding_generator = EmbeddingGenerator(
+    #         api_key=Config.AZURE_OPENAI_EMBEDDING_API_KEY,
+    #         model=Config.AZURE_OPENAI_EMBEDDING_MODEL,
+    #         use_azure=True,
+    #         azure_endpoint=Config.AZURE_OPENAI_EMBEDDING_API_BASE,
+    #         azure_deployment=Config.AZURE_OPENAI_EMBEDDING_MODEL,
+    #         api_version=Config.AZURE_OPENAI_EMBEDDING_API_VERSION
+    #     )
+    # 
+    # postgres_conn = Config.POSTGRES_CONNECTION_STRING
+    # vector_store = VectorStore(postgres_conn, min_conn=2, max_conn=10)
+    # 
+    # rag_pipeline_inference = SuccessStoryChatBot(embedding_generator, vector_store)
+    # 
+    # return rag_pipeline_inference
 
 @mcp.tool()
 def message_gpt(message: str, workspace_id: str, user_id: str, session_id: str, history: Optional[List[Dict[str, str]]] = None):
@@ -145,80 +155,135 @@ def message_gpt(message: str, workspace_id: str, user_id: str, session_id: str, 
         logging.info(f" User message saved: {user_message_id}")
         conversation_history = session_manager.load_history(workspace_id, user_id, session_id)
         
-        # Format history for LLM context (last 5 messages for context window)
-        history_context = ""
-        formatted_history = []
-        if len(conversation_history) > 1:  # More than just the current message
-            recent_messages = conversation_history[-6:-1]  # Last 5 messages before current
-            for msg in recent_messages:
-                formatted_history.append({
-                    "role": msg["role"],
-                    "content": msg["content"]
+        # --- NEW PROXY RAG RETRIEVAL CODE START ---
+        logging.info(" Querying Multimodal Proxy RAG bot...")
+        ans_dict = rag_pipeline.answer(message)
+        
+        answer_text = ans_dict.get('answer', 'No answer generated.')
+        finalists = ans_dict.get('finalists', [])
+        
+        # Build client-facing and database-facing source lists
+        sources_to_save = []
+        client_sources = []
+        seen_breadcrumbs = set()
+        
+        for f in finalists:
+            breadcrumb = f.get('breadcrumb', 'Unknown')
+            if breadcrumb not in seen_breadcrumbs:
+                seen_breadcrumbs.add(breadcrumb)
+                download_url = f.get('download_url') or f.get('url') or ''
+                
+                # Client response expects file_name and downloadable_link
+                client_sources.append({
+                    'file_name': breadcrumb,
+                    'downloadable_link': download_url
+                })
+                
+                # DB logging logs structured fields
+                sources_to_save.append({
+                    'file_name': breadcrumb,
+                    'download_url': download_url,
+                    'similarity': f.get('score', 0.85),
+                    'category': f.get('category', 'general'),
+                    'chunk_text': f.get('text', ''),
+                    'source': download_url
                 })
 
-        logging.info(" Searching for relevant success stories...")
-        
-        previous_sources = session_manager.get_last_assistant_sources(workspace_id, user_id, session_id)
-        is_followup = rag_pipeline._is_followup_query(message, formatted_history)
-        
-        if is_followup and previous_sources:
-            print(f" Follow-up detected! Including {len(previous_sources)} previous sources")
-
-
-        search_results = rag_pipeline.search(
-            query=message,
-            top_k=5,
-            similarity_threshold=0.4,
-            previous_sources=previous_sources,
-            is_followup=is_followup
-        )
-
-        response_dict = rag_pipeline.generate_response_structured(
-            query=message,
-            search_results=search_results,
-            conversation_history=formatted_history  # Pass history here
-        )
-        
-        sources_to_save = []
-        for source in response_dict.get('sources', []):
-            # Find matching search result to get chunk_text
-            matching_result = next(
-                (r for r in search_results if r.get('file_name') == source.get('file_name', '').replace('[1] ', '').replace('[2] ', '').replace('[3] ', '').replace('[4] ', '').replace('[5] ', '')),
-                None
-            )
-            
-            source_data = {
-                'file_name': source.get('file_name'),
-                'download_url': source.get('download_url'),
-                'similarity': matching_result.get('similarity', 0.85) if matching_result else 0.85,
-                'category': matching_result.get('category', 'N/A') if matching_result else 'N/A',
-                'chunk_text': matching_result.get('chunk_text', matching_result.get('content', '')) if matching_result else '',
-                'source': source.get('download_url')  # For compatibility
-            }
-            sources_to_save.append(source_data)
-               
         assistant_message_id = session_manager.append_message(
             workspace_id=workspace_id,
             user_id=user_id,
             session_id=session_id,
             role="assistant",
-            content=response_dict.get('response'),
+            content=answer_text,
             sources=sources_to_save
         )
         logging.info(f" Assistant response saved: {assistant_message_id}")
         
         response = {
-                'response': response_dict.get('response'),
-                'sources': response_dict.get('sources')
-            }
+            'response': answer_text,
+            'sources': client_sources
+        }
         return response
-        
+        # --- NEW PROXY RAG RETRIEVAL CODE END ---
+
+        # COMMENTED OUT OLD RAG PIPELINE EXECUTION:
+        # # Format history for LLM context (last 5 messages for context window)
+        # history_context = ""
+        # formatted_history = []
+        # if len(conversation_history) > 1:  # More than just the current message
+        #     recent_messages = conversation_history[-6:-1]  # Last 5 messages before current
+        #     for msg in recent_messages:
+        #         formatted_history.append({
+        #             "role": msg["role"],
+        #             "content": msg["content"]
+        #         })
+        # 
+        # logging.info(" Searching for relevant success stories...")
+        # 
+        # previous_sources = session_manager.get_last_assistant_sources(workspace_id, user_id, session_id)
+        # is_followup = rag_pipeline._is_followup_query(message, formatted_history)
+        # 
+        # if is_followup and previous_sources:
+        #     print(f" Follow-up detected! Including {len(previous_sources)} previous sources")
+        # 
+        # 
+        # search_results = rag_pipeline.search(
+        #     query=message,
+        #     top_k=5,
+        #     similarity_threshold=0.4,
+        #     previous_sources=previous_sources,
+        #     is_followup=is_followup
+        # )
+        # 
+        # response_dict = rag_pipeline.generate_response_structured(
+        #     query=message,
+        #     search_results=search_results,
+        #     conversation_history=formatted_history  # Pass history here
+        # )
+        # 
+        # sources_to_save = []
+        # for source in response_dict.get('sources', []):
+        #     # Find matching search result to get chunk_text
+        #     matching_result = next(
+        #         (r for r in search_results if r.get('file_name') == source.get('file_name', '').replace('[1] ', '').replace('[2] ', '').replace('[3] ', '').replace('[4] ', '').replace('[5] ', '')),
+        #         None
+        #     )
+        #     
+        #     source_data = {
+        #         'file_name': source.get('file_name'),
+        #         'download_url': source.get('download_url'),
+        #         'similarity': matching_result.get('similarity', 0.85) if matching_result else 0.85,
+        #         'category': matching_result.get('category', 'N/A') if matching_result else 'N/A',
+        #         'chunk_text': matching_result.get('chunk_text', matching_result.get('content', '')) if matching_result else '',
+        #         'source': source.get('download_url')  # For compatibility
+        #     }
+        #     sources_to_save.append(source_data)
+        #        
+        # assistant_message_id = session_manager.append_message(
+        #     workspace_id=workspace_id,
+        #     user_id=user_id,
+        #     session_id=session_id,
+        #     role="assistant",
+        #     content=response_dict.get('response'),
+        #     sources=sources_to_save
+        # )
+        # logging.info(f" Assistant response saved: {assistant_message_id}")
+        # 
+        # response = {
+        #         'response': response_dict.get('response'),
+        #         'sources': response_dict.get('sources')
+        #     }
+        # return response
+
     except Exception as e:
         print(f"\nError: {e}\n")
         return {"Error": f"Error: {e}", "sources": []}
     
     finally:
         # Cleanup
-        rag_pipeline.vector_store.close_all_connections()
+        if hasattr(rag_pipeline, 'vector_store') and hasattr(rag_pipeline.vector_store, 'close_all_connections'):
+            rag_pipeline.vector_store.close_all_connections()
+        elif hasattr(rag_pipeline, 'store') and hasattr(rag_pipeline.store, 'db') and hasattr(rag_pipeline.store.db, 'close_all_connections'):
+            rag_pipeline.store.db.close_all_connections()
 
 
