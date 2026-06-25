@@ -144,8 +144,22 @@ class MMRagBot:
                                 blob_name = f"extracted_papers/{f['doc_id']}/figures/{fname}"
                                 blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
                                 p.parent.mkdir(parents=True, exist_ok=True)
-                                with open(p, "wb") as download_file:
-                                    download_file.write(blob_client.download_blob().readall())
+                                
+                                # Write to a temporary file first, then rename atomically to prevent concurrent write corruption
+                                import tempfile
+                                import os
+                                with tempfile.NamedTemporaryFile(dir=str(p.parent), delete=False) as tmp_file:
+                                    tmp_path = Path(tmp_file.name)
+                                    try:
+                                        tmp_file.write(blob_client.download_blob().readall())
+                                        tmp_file.flush()
+                                        os.fsync(tmp_file.fileno())
+                                        tmp_file.close()
+                                        os.replace(tmp_path, p)
+                                    except Exception as write_err:
+                                        if tmp_path.exists():
+                                            os.remove(tmp_path)
+                                        raise write_err
                             except Exception as e:
                                 print(f"Warning: Failed to download figure {fname} from Blob Storage: {e}")
 
