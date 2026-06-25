@@ -131,6 +131,24 @@ class MMRagBot:
                     p = config.PAPERS_DIR / f["doc_id"] / rel
                     fname = Path(rel).name
                     filename_to_path[fname] = p
+                    
+                    if not p.exists():
+                        # Try to download from Azure Blob Storage
+                        from config import Config
+                        connection_string = Config.AZURE_STORAGE_CONNECTION_STRING
+                        container_name = Config.AZURE_CONTAINER_NAME or "success-stories"
+                        if connection_string:
+                            try:
+                                from azure.storage.blob import BlobServiceClient
+                                blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+                                blob_name = f"extracted_papers/{f['doc_id']}/figures/{fname}"
+                                blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+                                p.parent.mkdir(parents=True, exist_ok=True)
+                                with open(p, "wb") as download_file:
+                                    download_file.write(blob_client.download_blob().readall())
+                            except Exception as e:
+                                print(f"Warning: Failed to download figure {fname} from Blob Storage: {e}")
+
                     if p.exists() and p not in image_paths and len(image_paths) < 12:
                         image_paths.append(p)
                     names.append(fname)

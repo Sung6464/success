@@ -27,6 +27,10 @@ def _safe_doc_id(filename: str) -> str:
     return stem or "document"
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 def _new_doc_dir(doc_id: str) -> Path:
     """Create a fresh <doc_id>/ folder (overwriting any previous extraction)."""
     out = config.PAPERS_DIR / doc_id
@@ -35,6 +39,30 @@ def _new_doc_dir(doc_id: str) -> Path:
     (out / "figures").mkdir(parents=True, exist_ok=True)
     (out / "tables").mkdir(parents=True, exist_ok=True)
     return out
+
+
+def _upload_figure_to_blob(local_path: Path, doc_id: str, fname: str) -> None:
+    """Uploads a cropped figure to Azure Blob Storage if configured."""
+    from config import Config
+    connection_string = Config.AZURE_STORAGE_CONNECTION_STRING
+    container_name = Config.AZURE_CONTAINER_NAME or "success-stories"
+    
+    if not connection_string:
+        return
+        
+    try:
+        from azure.storage.blob import BlobServiceClient
+        blob_service_client = BlobServiceClient.from_connection_string(connection_string)
+        # Store figures under prefix 'extracted_papers/<doc_id>/figures/<fname>'
+        blob_name = f"extracted_papers/{doc_id}/figures/{fname}"
+        blob_client = blob_service_client.get_blob_client(container=container_name, blob=blob_name)
+        
+        with open(local_path, "rb") as data:
+            blob_client.upload_blob(data, overwrite=True)
+            
+        logger.info(f"Uploaded figure to Blob Storage: {blob_name}")
+    except Exception as e:
+        logger.warning(f"Warning: Failed to upload figure {fname} to Blob Storage: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +152,9 @@ def extract_pdf_with_document_intelligence(pdf_path: Path, doc_id: str) -> Path:
                     try:
                         pix = page.get_pixmap(clip=rect, dpi=150)
                         fname = f"img_{fig.id}.png"
-                        pix.save(str(fig_dir / fname))
+                        local_path = fig_dir / fname
+                        pix.save(str(local_path))
+                        _upload_figure_to_blob(local_path, doc_id, fname)
                     except Exception as e:
                         print(f"Failed to crop figure {fig.id}: {e}")
         doc.close()
@@ -192,7 +222,9 @@ def extract_pdf(pdf_path: Path, doc_id: str) -> Path:
                     img_counter += 1
                     ext_to_use = ext.lower() if ext.lower() in SUPPORTED_IMAGE_EXTS else "png"
                     fname = f"img_{img_counter}.{ext_to_use}"
-                    (fig_dir / fname).write_bytes(img_bytes)
+                    local_path = fig_dir / fname
+                    local_path.write_bytes(img_bytes)
+                    _upload_figure_to_blob(local_path, doc_id, fname)
                     rel = f"figures/{fname}"
                     seen_xrefs[key] = rel
                 items.append((y0, f"![]({rel})"))
@@ -209,7 +241,9 @@ def extract_pdf(pdf_path: Path, doc_id: str) -> Path:
                         pix = fitz.Pixmap(fitz.csRGB, pix)
                     img_counter += 1
                     fname = f"img_{img_counter}.png"
-                    pix.save(str(fig_dir / fname))
+                    local_path = fig_dir / fname
+                    pix.save(str(local_path))
+                    _upload_figure_to_blob(local_path, doc_id, fname)
                     rel = f"figures/{fname}"
                     seen_xrefs[xref] = rel
                     items.append((9_999, f"![]({rel})"))
@@ -290,7 +324,9 @@ def extract_docx(docx_path: Path, doc_id: str) -> Path:
             ext = "png"
         img_counter += 1
         fname = f"img_{img_counter}.{ext.lower()}"
-        (fig_dir / fname).write_bytes(blob)
+        local_path = fig_dir / fname
+        local_path.write_bytes(blob)
+        _upload_figure_to_blob(local_path, doc_id, fname)
         return f"figures/{fname}"
 
     for para in document.paragraphs:
@@ -374,7 +410,9 @@ def extract_pptx(pptx_path: Path, doc_id: str) -> Path:
                 image = shape.image
                 ext = image.ext
                 fname = f"img_{img_counter}.{ext}"
-                (fig_dir / fname).write_bytes(image.blob)
+                local_path = fig_dir / fname
+                local_path.write_bytes(image.blob)
+                _upload_figure_to_blob(local_path, doc_id, fname)
                 md_lines.append(f"![](figures/{fname})")
                 md_lines.append("")
 
